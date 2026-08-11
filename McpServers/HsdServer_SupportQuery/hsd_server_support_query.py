@@ -38,6 +38,8 @@ Usage:
 import os
 import sys
 import json
+import re
+import html
 from collections import Counter
 from typing import Optional
 
@@ -117,6 +119,63 @@ def _saved_query_url(query_id: str) -> str:
     ad-hoc HQL. Executing a saved query returns its member records.
     """
     return f"{HSD_BASE_URL}/rest/query/{query_id}"
+
+
+def _article_history_url(article_id: str) -> str:
+    """Build the HSD-ES article history URL.
+
+    GET on this endpoint returns the full revision changelog for a single
+    article. Each revision record carries an accumulated ``comments`` field,
+    so the comment thread is reconstructed from history rather than from the
+    dedicated ``/comments`` endpoint (which is unreliable and frequently
+    returns an error for these articles).
+    """
+    return f"{HSD_BASE_URL}/rest/article/{article_id}/history"
+
+
+def _html_to_text(raw: str) -> str:
+    """Convert an HSD comment HTML fragment to readable plain text."""
+    if not raw:
+        return ""
+    text = re.sub(r"<br ?/?>", "\n", raw)
+    text = re.sub(r"</p>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html.unescape(text)
+    # Collapse excess blank lines / trailing whitespace.
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    return "\n".join(lines).strip()
+
+
+def _parse_comment_thread(comments_html: str) -> list:
+    """Parse the accumulated ``comments`` HTML into structured comments.
+
+    HSD stores the whole comment thread in a single field where each comment
+    is introduced by a marker of the form ``++++<commentId> <author>`` followed
+    by the comment body. This splits on that marker and returns an ordered list
+    (oldest first) of {comment_id, author, text} dicts.
+    """
+    if not comments_html:
+        return []
+
+    marker = re.compile(r"\+\+\+\+(\d+)\s+(\S+)")
+    matches = list(marker.finditer(comments_html))
+    if not matches:
+        # No markers -- return the whole field as a single comment.
+        body = _html_to_text(comments_html)
+        return [{"comment_id": None, "author": None, "text": body}] if body else []
+
+    parsed = []
+    for idx, match in enumerate(matches):
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(comments_html)
+        parsed.append(
+            {
+                "comment_id": match.group(1),
+                "author": match.group(2),
+                "text": _html_to_text(comments_html[start:end]),
+            }
+        )
+    return parsed
 
 
 # Fields requested from / surfaced for each saved-query member record.
@@ -222,6 +281,68 @@ def _fetch_saved_query_rows(query_id: str, max_results: int) -> tuple:
     rows = data.get("data", data.get("results", []))
     total = data.get("total", len(rows))
     return rows, total, None
+
+
+def _fetch_article_comments(article_id: str) -> tuple:
+    """Fetch the comment thread for a single article via its history.
+
+    The dedicated ``/comments`` endpoint is unreliable for these articles, so
+    comments are reconstructed from the article history: the highest revision
+    that carries a non-empty ``comments`` field holds the full accumulated
+    thread, which is then parsed into individual comments.
+
+    Returns (comments, error_json). If error_json is not None the request
+    failed and it should be returned to the caller as-is.
+    """
+    searcher = _create_searcher()
+    url = _article_history_url(article_id)
+
+    try:
+        response = requests.get(
+            url,
+            headers=searcher.headers,
+            auth=searcher.auth,
+            timeout=60,
+            verify=VERIFY_SSL,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "?"
+        detail = (
+            exc.response.text[:300]
+            if (exc.response is not None and exc.response.text)
+            else "No details"
+        )
+        return None, json.dumps(
+            {
+                "error": f"History request failed (HTTP {status}) for "
+                f"article_id={article_id}",
+                "detail": detail,
+                "url": url,
+            },
+            indent=2,
+        )
+    except requests.exceptions.RequestException as exc:
+        return None, json.dumps(
+            {"error": f"Request error for article_id={article_id}: {exc}", "url": url},
+            indent=2,
+        )
+
+    revisions = data.get("data", data.get("results", []))
+    if isinstance(revisions, dict):
+        revisions = [revisions]
+
+    # Pick the revision with the most complete comment thread. HSD accumulates
+    # the whole thread into each revision's ``comments`` field, so the longest
+    # (typically highest-rev) non-empty value holds every comment.
+    best_html = ""
+    for rev in revisions:
+        candidate = rev.get("comments") or ""
+        if len(candidate) > len(best_html):
+            best_html = candidate
+
+    return _parse_comment_thread(best_html), None
 
 
 # ============================================================================
@@ -346,6 +467,55 @@ def hsd_saved_query_field_stats(
             "scanned_count": len(formatted_rows),
             "distinct_count": len(counter),
             "top_values": [{"value": v, "count": c} for v, c in ranked],
+        },
+        indent=2,
+        default=str,
+    )
+
+
+@mcp.tool()
+def hsd_get_article_comments(article_id: str, max_results: int = 0) -> str:
+    """
+    Retrieve the comment thread for a single HSD-ES article.
+
+    Complements the saved-query tools by exposing the comments attached to an
+    individual HSD article. Comments are always reconstructed from the article
+    history (GET /rest/article/<id>/history), because the dedicated
+    /rest/article/<id>/comments endpoint is unreliable and frequently fails for
+    these articles. The highest revision carries the full accumulated thread,
+    which is parsed into individual {comment_id, author, text} entries.
+
+    Args:
+        article_id: The HSD article ID (e.g., '14028310220'). A full article
+            URL is also accepted; the trailing numeric ID is extracted.
+        max_results: Maximum number of comments to return, ordered oldest
+            first. Use 0 (default) to return all comments.
+
+    Returns:
+        JSON string with article_id, comment_count, returned_count, url, and a
+        'comments' list (oldest first). Use the last element for the most
+        recent comment. On failure, a JSON object with an 'error' field.
+    """
+    # Accept a full article URL and extract the trailing numeric id.
+    cleaned = str(article_id).strip().rstrip("/")
+    if "/" in cleaned:
+        cleaned = cleaned.split("/")[-1]
+
+    comments, error = _fetch_article_comments(cleaned)
+    if error is not None:
+        return error
+
+    total = len(comments)
+    if max_results and max_results > 0:
+        comments = comments[:max_results]
+
+    return json.dumps(
+        {
+            "article_id": cleaned,
+            "comment_count": total,
+            "returned_count": len(comments),
+            "url": f"{HSD_BASE_URL}/appstore/article-one/#/{cleaned}",
+            "comments": comments,
         },
         indent=2,
         default=str,
