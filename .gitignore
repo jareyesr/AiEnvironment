@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+*.key
+*.pem
+secrets.*
+
+# OS / editor
+Thumbs.db
+.DS_Store
+nul
+
+# Logs
+*.log

@@ -1,0 +1,12 @@
+# Direct dependencies of this companion server.
+# NOTE: This folder (HsdServer_SupportQuery/) is authored by jareyesr.
+#       It also depends at runtime on the EXTERNAL, third-party HsdSearcher
+#       class (hsd_searcher.py), which is NOT authored here and is located in
+#       the external HSD agent directory (see README.md / EXTERNAL_HSD_DIR).
+requests>=2.25.0
+mcp>=0.1.0
+
+# Pulled in transitively by the reused external HsdSearcher depending on the
+# selected HSD_AUTH_METHOD (kerberos / ntlm). Listed to mirror external needs.
+requests-kerberos>=0.14.0
+requests-ntlm>=1.1.0
