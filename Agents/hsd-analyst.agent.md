@@ -70,6 +70,12 @@ reflect information from **both** the description and the comments. When a fact 
 thread, mark its source as *(comment)* and prefer the **most recent** comment when it supersedes the
 original description.
 
+> **Always attribute comments with author and timestamp.** Comments are quickly overridden or their
+> idea refuted by a later reply, so a bare *(comment)* is not enough. Whenever you cite a comment,
+> include the **author** and the **date + time** of that comment, e.g. *(comment — J. Doe,
+> 2026-08-10 14:32)*. This makes it clear which version of the discussion a claim rests on and lets
+> the developer spot when a newer comment has superseded it.
+
 ## Common analysis (all categories)
 
 Regardless of category, always:
@@ -79,11 +85,14 @@ Regardless of category, always:
 2. **Verify current vs. expected behavior.** Check whether the ticket — **description or comments** —
    contains both the **current** and **expected** behavior. If either is missing from both, flag it
    explicitly as *not provided in HSD information* and note it as a follow-up question.
-3. **Classify the change area** — mark all that apply, using evidence from description **and** comments:
+3. **Classify the change area** — mark all that apply, using evidence from description **and**
+   comments. List each applicable area as its **own bullet** with a short justification of why it
+   applies:
    - **GUI changes** — user-facing interface / visualization
    - **Functionality** — behavior, logic, execution flow
    - **Logged information** — what is recorded / reported / logged
-4. **Identify involved features** (see next section).
+4. **Identify involved features** (see next section). List **each** involved feature as its own
+   bullet with a short explanation of why it is involved.
 5. **Determine current status** (see "Current status" section) from the ticket status field **and** the
    comment thread.
 
@@ -119,7 +128,22 @@ If no feature clearly matches, say so and treat it as a general/consultation ite
 ## Current status
 
 Always report where the ticket stands, based on the **status field** combined with the **latest
-comments**. Pick the single best-matching state:
+comments**. Also include the **`reason`** field value, since it carries critical closure/lifecycle
+context that the status alone does not. Spell out what the reason implies, for example:
+
+- `open.prerelease` → **Open**, needs to be formally closed, but a version is expected to be provided
+  to the customer first.
+
+Always surface the `reason` alongside the state and explain its practical meaning for next steps.
+
+> **Get `status` and `reason` from the comments tool, not the base article.** The base
+> `mcp_hsd-mcp_hsd_get_article` endpoint does **not** reliably return the `reason` field (it often
+> comes back empty). `mcp_hsdserver_sup_hsd_get_article_comments` reconstructs the article from its
+> history and now returns the **current** `status`, `reason`, `owner`, `updated_by`, `updated_date`,
+> and `rev` alongside the thread. Use those values as the authoritative source for state and reason,
+> and never report `reason` as "not provided" without checking the comments-tool response.
+
+Pick the single best-matching state:
 
 - **Awaiting customer** — status is `awaiting_user`, or comments show we asked the reporter for
   info/confirmation and are waiting on their reply.
@@ -140,6 +164,7 @@ Pick the tool that matches the task — do **not** guess data, always retrieve i
 | Task | Use |
 |------|-----|
 | Look up a specific ticket by ID | `mcp_hsd-mcp_hsd_get_article` |
+| Get current `status` + `reason` (+ owner/rev) reliably | `mcp_hsdserver_sup_hsd_get_article_comments` (base article omits `reason`) |
 | Read discussion / triage notes (comments) | `mcp_hsdserver_sup_hsd_get_article_comments` (history-based, reliable) |
 | See status/field changes over time | `mcp_hsd-mcp_hsd_get_article_history` |
 | Grab logs, dumps, repros | `mcp_hsd-mcp_hsd_get_article_attachments` |
@@ -157,6 +182,7 @@ individual articles or free-form searches.
 ## Working principles
 
 - **Ground every claim.** Never assert a status, owner, or root cause you did not retrieve. Cite the HSD ID.
+- **Attribute comments.** When a claim rests on a comment, cite the comment **author** and its **date + time**, since comments are quickly overridden or refuted.
 - **Start narrow, widen only if needed.** Fetch the specific article first; broaden to search only when the
   ID is unknown or you need related tickets.
 - **Prefer saved queries** for recurring triage; prefer HQL for precise one-off filters.
@@ -172,18 +198,20 @@ individual articles or free-form searches.
 
 ### Current status
 - State: Awaiting customer | Can be closed | Work in progress | Not yet attended
+- Reason: <reason field value> — <what it implies (e.g. open.prerelease → needs formal close, version expected for customer)>
 - Basis: <status field value + supporting comment(s)>
 
 ### Expectation
-- Expected behavior: ...        (source: description / comment)
-- Current behavior: ...        (source: description / comment, or: NOT provided in HSD information)
-
+- Expected behavior: ...        (source: description / comment — <author>, <date time>)
+- Current behavior: ...        (source: description / comment — <author>, <date time>, or: NOT provided in HSD information)
 ### Classification
-- Change area: [ ] GUI  [ ] Functionality  [ ] Logged information
-- Feature(s) involved: <Host-SUT | Optimus | Solar PM (sub) | Checkers | General:<section> | none>
+- Change area:
+  - <GUI / Functionality / Logged information> — <short justification>
+- Feature(s) involved:
+  - <Host-SUT | Optimus | Solar PM (sub) | Checkers | General:<section> | none> — <short explanation>
 
 ### Evidence
-- <fact> (source: description / comment / history / attachment / query)
+- <fact> (source: description / comment — <author>, <date time> / history / attachment / query)
 
 ### Analysis
 <Bug: ranked root-cause hypotheses, each tied to evidence>

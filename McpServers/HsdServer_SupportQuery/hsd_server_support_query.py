@@ -178,7 +178,38 @@ def _parse_comment_thread(comments_html: str) -> list:
     return parsed
 
 
-# Fields requested from / surfaced for each saved-query member record.
+# Current article fields surfaced alongside the comment thread. These come from
+# the latest history revision because the base article endpoint does not
+# reliably return ``reason`` (critical closure/lifecycle context).
+ARTICLE_META_FIELDS = [
+    "id",
+    "title",
+    "status",
+    "reason",
+    "owner",
+    "updated_by",
+    "updated_date",
+    "rev",
+]
+
+
+def _extract_current_meta(revisions: list) -> dict:
+    """Pick current article fields from the latest (highest-rev) revision.
+
+    HSD history returns one record per revision; the one with the largest
+    numeric ``rev`` reflects the current state of the article.
+    """
+    if not revisions:
+        return {}
+
+    def _rev_num(record: dict) -> int:
+        try:
+            return int(record.get("rev") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    latest = max(revisions, key=_rev_num)
+    return {field: latest.get(field, "") for field in ARTICLE_META_FIELDS}
 #
 # This set mirrors the columns exposed by the working saved query
 #   https://hsdes.intel.com/appstore/generalapps/#/pages/community/14025907139?queryId=14025907745
@@ -284,15 +315,19 @@ def _fetch_saved_query_rows(query_id: str, max_results: int) -> tuple:
 
 
 def _fetch_article_comments(article_id: str) -> tuple:
-    """Fetch the comment thread for a single article via its history.
+    """Fetch the comment thread and current metadata for a single article.
 
     The dedicated ``/comments`` endpoint is unreliable for these articles, so
     comments are reconstructed from the article history: the highest revision
     that carries a non-empty ``comments`` field holds the full accumulated
-    thread, which is then parsed into individual comments.
+    thread, which is then parsed into individual comments. The same history
+    also exposes the current article fields (``status``, ``reason``, etc.);
+    the latest revision is surfaced as metadata because the base article
+    endpoint does not reliably return ``reason``.
 
-    Returns (comments, error_json). If error_json is not None the request
-    failed and it should be returned to the caller as-is.
+    Returns (comments, meta, error_json). If error_json is not None the request
+    failed and it should be returned to the caller as-is. ``meta`` is a dict
+    of current article fields taken from the latest revision.
     """
     searcher = _create_searcher()
     url = _article_history_url(article_id)
@@ -314,7 +349,7 @@ def _fetch_article_comments(article_id: str) -> tuple:
             if (exc.response is not None and exc.response.text)
             else "No details"
         )
-        return None, json.dumps(
+        return None, None, json.dumps(
             {
                 "error": f"History request failed (HTTP {status}) for "
                 f"article_id={article_id}",
@@ -324,7 +359,7 @@ def _fetch_article_comments(article_id: str) -> tuple:
             indent=2,
         )
     except requests.exceptions.RequestException as exc:
-        return None, json.dumps(
+        return None, None, json.dumps(
             {"error": f"Request error for article_id={article_id}: {exc}", "url": url},
             indent=2,
         )
@@ -342,7 +377,8 @@ def _fetch_article_comments(article_id: str) -> tuple:
         if len(candidate) > len(best_html):
             best_html = candidate
 
-    return _parse_comment_thread(best_html), None
+    meta = _extract_current_meta(revisions)
+    return _parse_comment_thread(best_html), meta, None
 
 
 # ============================================================================
@@ -492,16 +528,20 @@ def hsd_get_article_comments(article_id: str, max_results: int = 0) -> str:
             first. Use 0 (default) to return all comments.
 
     Returns:
-        JSON string with article_id, comment_count, returned_count, url, and a
-        'comments' list (oldest first). Use the last element for the most
-        recent comment. On failure, a JSON object with an 'error' field.
+        JSON string with article_id, current article metadata (status, reason,
+        owner, title, updated_by, updated_date, rev), comment_count,
+        returned_count, url, and a 'comments' list (oldest first). The
+        'status' and 'reason' fields reflect the article's current state
+        (reason carries critical closure/lifecycle context that the base
+        article endpoint does not reliably return). Use the last comment for
+        the most recent one. On failure, a JSON object with an 'error' field.
     """
     # Accept a full article URL and extract the trailing numeric id.
     cleaned = str(article_id).strip().rstrip("/")
     if "/" in cleaned:
         cleaned = cleaned.split("/")[-1]
 
-    comments, error = _fetch_article_comments(cleaned)
+    comments, meta, error = _fetch_article_comments(cleaned)
     if error is not None:
         return error
 
@@ -509,9 +549,17 @@ def hsd_get_article_comments(article_id: str, max_results: int = 0) -> str:
     if max_results and max_results > 0:
         comments = comments[:max_results]
 
+    meta = meta or {}
     return json.dumps(
         {
             "article_id": cleaned,
+            "status": meta.get("status", ""),
+            "reason": meta.get("reason", ""),
+            "owner": meta.get("owner", ""),
+            "title": meta.get("title", ""),
+            "updated_by": meta.get("updated_by", ""),
+            "updated_date": meta.get("updated_date", ""),
+            "rev": meta.get("rev", ""),
             "comment_count": total,
             "returned_count": len(comments),
             "url": f"{HSD_BASE_URL}/appstore/article-one/#/{cleaned}",
