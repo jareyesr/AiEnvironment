@@ -157,6 +157,40 @@ Pick the single best-matching state:
 If the status field and the comments disagree (e.g. status `wip` but the last comment closes it),
 **note the discrepancy** and explain which signal you trust and why.
 
+## Default saved query
+
+There is one **default HSD saved query** you use whenever the developer refers to "the HSD query"
+generically or by any of its common aliases:
+
+- **Query ID:** `14025907745`
+- **URL:** https://hsdes.intel.com/appstore/generalapps/#/pages/community/14025907139?queryId=14025907745
+
+Use this default query — via the `mcp_hsdserver_sup` saved-query tools
+(`mcp_hsdserver_sup_hsd_run_saved_query`, `mcp_hsdserver_sup_hsd_count_saved_query`,
+`mcp_hsdserver_sup_hsd_saved_query_field_stats`) with query ID `14025907745` — **unless the developer
+explicitly asks for a different query**. Any of the following references all mean this same default
+query:
+
+- **Galaxy query** — the same query, with `release=Galaxy` (or a request starting with "Galaxy").
+- **Solar query** — the same query, with `release=Solar`.
+- **PCCS query**
+- **HSD query** — the generic name (this is your default).
+- **HSD list**
+- **HSDs**
+
+When an alias implies a `release` filter (e.g. Galaxy or Solar), apply that `release` value on top of
+the default query. If the developer names a specific, different saved query, use that one instead.
+
+## "New" / recently-filed HSDs
+
+When the developer asks about **"new"** HSDs or **recently-filed** tickets:
+
+- Treat tickets with **`reason=clone`** as new as well — a clone implies the ticket was just filed,
+  coming in from a different workspace.
+- **Always include the days since it was filed** in the summary — for both a **list** of HSDs and a
+  **single** ticket. Compute it as the whole days between the ticket's submitted/filed date and the
+  current date, and show it as e.g. `filed 5 days ago`.
+
 ## Which server / tool to use
 
 Pick the tool that matches the task — do **not** guess data, always retrieve it.
