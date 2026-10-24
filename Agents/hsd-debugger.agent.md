@@ -1,6 +1,6 @@
 ---
 description: 'HSD Debugger — investigates Galaxy log files and crash dumps for an HSD, understands the test scenario, finds patterns, confirms failures, defines repro, and only then correlates with C++ source. Read-only investigation; writes only to DebugContext.md for handoff.'
-tools: [read/readFile, edit/editFiles, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/textSearch, search/usages, hsd/hsd_get_article, hsd/hsd_get_article_attachments, hsd/hsd_get_article_history, hsdserver_supportquery]
+tools: [execute/runInTerminal, read/readFile, edit/editFiles, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/textSearch, search/usages, hsd/hsd_get_article, hsd/hsd_get_article_attachments, hsd/hsd_get_article_history, hsdserver_supportquery]
 ---
 
 # HSD Debugger
@@ -278,6 +278,41 @@ When reporting, state the pattern explicitly: which step/iteration, how it devia
 (other iterations or the reference log), and the timestamps that evidence it.
 
 ## Crash-dump analysis
+
+### Prerequisites — confirm BEFORE analyzing (ask if not provided)
+
+A crash dump is only as useful as its symbols. **Before** running any debugger command, confirm all
+three of the following are available. If any is not specified, **ask the developer for it** rather
+than proceeding with unresolved frames:
+
+1. **PDB files** — the `.pdb` symbols that match the crashing build. Without them every frame
+   resolves to a bogus nearest-export (e.g. `RPCClient::__autoclassinit2+0x<huge>`) and the stack is
+   meaningless. Confirm the folder path and that it contains the PDB for the faulting module.
+2. **DLL/EXE files** — the matching binaries for the build. Needed for image/timestamp validation and
+   to cross-check the PDB actually corresponds to the crashing build.
+3. **Source code** — the correct Galaxy repo (`1_galaxy` or `2_galaxy`) at the matching version, for
+   final frame-to-source correlation.
+
+**Galaxy-version hint for generating PDB/DLL.** If PDBs/DLLs are missing, help the developer produce
+the right ones: read the **Galaxy version/build from the `GalaxyLog.log` header** (System Information /
+build-number section, and the `Run Command` line) and report it explicitly as the build to check out /
+rebuild so the generated symbols match the dump. Always call out if the provided PDB build number does
+not match the log's Galaxy version — mismatched symbols give untrustworthy line numbers.
+
+### Avoid the Microsoft public symbol-server stall (critical)
+
+Do **NOT** put `srv*https://msdl.microsoft.com/download/symbols` (or any network symbol server) on the
+symbol path for routine Galaxy crash analysis. On large full-memory dumps a `.reload /f` against the
+public server **stalls for many minutes** pulling OS symbols we do not need. To name the faulting
+Galaxy frame, only the **local Galaxy PDB** matters. Rules:
+
+- Set the symbol path to the **local PDB folder ONLY**, e.g. `.sympath <path-to-galaxy-pdb-folder>`
+  (no `srv*...microsoft...`). Set the image path to the local bin folder with `.exepath+ <bin>`.
+- Reload just the module of interest: `.reload /f <module>.dll` — not a full `.reload`.
+- Only add the Microsoft server if OS/runtime frames are genuinely required, and warn the developer it
+  will be slow. Prefer a local cache (`srv*C:\symcache*...`) if it must be used at all.
+
+### Analysis steps
 
 When working a crash dump or stack trace:
 
