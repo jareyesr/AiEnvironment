@@ -41,6 +41,7 @@ import json
 import re
 import html
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Optional
 
 try:
@@ -263,8 +264,107 @@ def _format_row(item: dict) -> dict:
     return formatted
 
 
+def _days_since(date_str: str) -> Optional[int]:
+    """Whole days between an HSD date string and now (UTC).
+
+    Accepts common HSD formats (ISO 8601 with/without 'T' and timezone).
+    Returns None when the value is empty or cannot be parsed.
+    """
+    if not date_str:
+        return None
+    raw = str(date_str).strip()
+    # Normalize a few common variants before attempting ISO parsing.
+    candidate = raw.replace("Z", "+00:00")
+    if " " in candidate and "T" not in candidate:
+        candidate = candidate.replace(" ", "T", 1)
+    parsed = None
+    for value in (candidate, raw[:19], raw[:10]):
+        try:
+            parsed = datetime.fromisoformat(value)
+            break
+        except ValueError:
+            continue
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - parsed
+    return max(delta.days, 0)
+
+
+# In-process cache of saved-query member rows. Keyed by query_id ->
+# (fetch_timestamp, max_results, rows, total). A short TTL keeps repeated tool
+# calls within one request from re-downloading the whole (often 900+ row)
+# member list each time.
+_SAVED_QUERY_CACHE: dict = {}
+_SAVED_QUERY_CACHE_TTL = float(os.getenv("SAVED_QUERY_CACHE_TTL", "120"))
+
+# Team roster used to decide whether a ticket's last update was made by the
+# support team or by a customer. An update by anyone NOT in this set counts as
+# a customer update (a signal the ticket is "unattended"). NOTE: "Shetty,
+# Nitin" is intentionally excluded — he is on the team but files/updates on
+# behalf of customers, so his updates are treated as customer updates.
+TEAM_MEMBERS = [
+    "Lopez Carrasco, Diana",
+    "Sarveswaran, Nilavan",
+    "Binder, Andrew",
+    "Chen, Guojun",
+    "Jumrani, Akash Chetanprakash",
+    "Nguyen, Thao",
+    "Reyes Ramirez, Jesus",
+    "Robertson, Marc",
+    "Gonzalez Solalinde, Luis",
+    "Valenzuela Gonzalez, Oscar",
+    "Ricks, Trenston",
+    "Dashora, Mahim",
+    "Paige, Dale",
+]
+
+
+def _is_team_member(name: str) -> bool:
+    """True when the given updated_by/owner name matches a team member.
+
+    Matching compares the first two tokens (surname + first name) of each
+    roster entry against the name, case-insensitively, so a middle initial or
+    suffix in either string does not break the match.
+    """
+    if not name:
+        return False
+    haystack = str(name).lower()
+    for member in TEAM_MEMBERS:
+        tokens = [t for t in re.split(r"[,\s]+", member.lower()) if t][:2]
+        if tokens and all(tok in haystack for tok in tokens):
+            return True
+    return False
+
+
 def _fetch_saved_query_rows(query_id: str, max_results: int) -> tuple:
-    """Fetch raw member rows for a saved query.
+    """Fetch raw member rows for a saved query, with a short-TTL cache.
+
+    Saved-query member lists are large (hundreds of rows) and several tools
+    (filter, field_stats, count, triage) re-read the same list within a single
+    request. To avoid re-downloading the whole query per tool call, the raw
+    rows are cached in-process keyed by query_id for a short TTL. A cached
+    snapshot with an equal-or-larger max_results satisfies smaller requests.
+
+    Returns (rows, total_count, error_json). If error_json is not None the
+    request failed and it should be returned to the caller as-is.
+    """
+    now = datetime.now(timezone.utc).timestamp()
+    cached = _SAVED_QUERY_CACHE.get(query_id)
+    if cached is not None:
+        ts, cached_max, rows, total = cached
+        if now - ts <= _SAVED_QUERY_CACHE_TTL and cached_max >= max_results:
+            return rows, total, None
+
+    rows, total, error = _fetch_saved_query_rows_uncached(query_id, max_results)
+    if error is None:
+        _SAVED_QUERY_CACHE[query_id] = (now, max_results, rows, total)
+    return rows, total, error
+
+
+def _fetch_saved_query_rows_uncached(query_id: str, max_results: int) -> tuple:
+    """Issue the REST GET that downloads a saved query's member rows.
 
     Returns (rows, total_count, error_json). If error_json is not None the
     request failed and it should be returned to the caller as-is.
@@ -448,15 +548,17 @@ def hsd_saved_query_field_stats(
     max_results: int = 5000,
     filter_field: Optional[str] = None,
     filter_value: Optional[str] = None,
+    filter_field2: Optional[str] = None,
+    filter_value2: Optional[str] = None,
 ) -> str:
     """
     Tally the values of a single field across a saved query's member articles.
 
     Useful for questions like "who is the main submitted_by?" or "which status
-    is most common?" without shipping every row back to the caller. An optional
-    filter narrows the scan to records where filter_field matches filter_value
-    (e.g., only release 'Solar'), enabling questions like "who is the main
-    owner for release Solar?".
+    is most common?" without shipping every row back to the caller. Up to two
+    optional filters narrow the scan to records where each filter_field matches
+    its filter_value (both must match — logical AND), enabling questions like
+    "how many reason=new tickets are in release Galaxy?" in a single call.
 
     Args:
         query_id: The saved query's queryId.
@@ -470,9 +572,13 @@ def hsd_saved_query_field_stats(
         filter_value: Optional value that filter_field must match. Matching is
             case-insensitive and substring-based (e.g., 'solar' matches
             'Solar').
+        filter_field2: Optional second filter field, ANDed with the first
+            (e.g., 'reason'). Requires filter_value2.
+        filter_value2: Optional value that filter_field2 must match (same
+            case-insensitive substring matching).
 
     Returns:
-        JSON string with query_id, field, applied filter, total_count,
+        JSON string with query_id, field, applied filters, total_count,
         scanned_count (records after filtering), distinct_count, and a ranked
         'top_values' list of {value, count}. On failure, an 'error'.
     """
@@ -482,15 +588,18 @@ def hsd_saved_query_field_stats(
 
     formatted_rows = [_format_row(item) for item in rows]
 
-    applied_filter = None
-    if filter_field and filter_value is not None:
-        needle = str(filter_value).lower()
-        formatted_rows = [
-            r
-            for r in formatted_rows
-            if needle in str(r.get(filter_field, "")).lower()
-        ]
-        applied_filter = {"field": filter_field, "value": filter_value}
+    applied_filters = []
+    for f_field, f_value in ((filter_field, filter_value),
+                             (filter_field2, filter_value2)):
+        if f_field and f_value is not None:
+            needle = str(f_value).lower()
+            formatted_rows = [
+                r
+                for r in formatted_rows
+                if needle in str(r.get(f_field, "")).lower()
+            ]
+            applied_filters.append({"field": f_field, "value": f_value})
+    applied_filter = applied_filters or None
 
     counter = Counter((r.get(field) or "(empty)") for r in formatted_rows)
     ranked = counter.most_common(top)
@@ -503,6 +612,287 @@ def hsd_saved_query_field_stats(
             "scanned_count": len(formatted_rows),
             "distinct_count": len(counter),
             "top_values": [{"value": v, "count": c} for v, c in ranked],
+        },
+        indent=2,
+        default=str,
+    )
+
+
+# Compact field set surfaced by hsd_filter_saved_query. Kept small so the whole
+# result stays parseable inline (no oversized single-line resource file).
+COMPACT_FIELDS = [
+    "id",
+    "title",
+    "status",
+    "reason",
+    "release",
+    "component",
+    "issue_type",
+    "record_type",
+    "owner",
+    "updated_by",
+    "priority",
+    "open_date",
+    "submitted_date",
+    "updated_date",
+    "url",
+]
+
+
+@mcp.tool()
+def hsd_filter_saved_query(
+    query_id: str,
+    filter_field: Optional[str] = None,
+    filter_value: Optional[str] = None,
+    filter_field2: Optional[str] = None,
+    filter_value2: Optional[str] = None,
+    fields: Optional[str] = None,
+    sort_by: str = "open_date",
+    descending: bool = True,
+    limit: int = 50,
+    max_results: int = 5000,
+) -> str:
+    """
+    Filter a saved query and return a small, inline-parseable set of rows.
+
+    This is the fast path for triage questions like "list the new / unattended
+    Galaxy HSDs with titles and how many days they have been open". It filters
+    the saved query by up to two ANDed field=value pairs, sorts (default by
+    open_date, newest first), caps the output to a small `limit`, and returns
+    only a compact set of fields per row plus computed `days_open` and
+    `days_since_submitted`. Because the payload is small and sorted, the caller
+    can read titles/dates/reasons/updated_by directly from the result WITHOUT
+    running a full dump or fetching articles one ID at a time.
+
+    Prefer this over hsd_run_saved_query when you need actual rows (titles,
+    dates) for a filtered subset. Use hsd_run_saved_query only when you truly
+    need the full unfiltered member list.
+
+    Args:
+        query_id: The saved query's queryId.
+        filter_field: First field to filter on (e.g., 'reason'). Requires
+            filter_value.
+        filter_value: Value filter_field must match (case-insensitive
+            substring, e.g. 'new').
+        filter_field2: Optional second filter field, ANDed with the first
+            (e.g., 'release'). Requires filter_value2.
+        filter_value2: Value filter_field2 must match (e.g., 'Galaxy').
+        fields: Optional comma-separated list of fields to return per row.
+            Defaults to a compact set (id, title, status, reason, release,
+            component, owner, updated_by, priority, open_date, submitted_date,
+            updated_date, url).
+        sort_by: Field to sort rows by (default: 'open_date').
+        descending: Sort newest/highest first when True (default: True).
+        limit: Maximum rows to return after sorting (default: 50). Keep this
+            small so the result stays inline-parseable.
+        max_results: Maximum member records to scan server-side (default:
+            5000).
+
+    Returns:
+        JSON string with query_id, applied filters, total_count,
+        matched_count (rows after filtering), returned_count, and a 'results'
+        list of compact rows. Each row includes the requested fields plus
+        'days_open' (whole days since open_date, or null) and
+        'days_since_submitted' (whole days since submitted_date, or null).
+        On failure, a JSON object with an 'error' field.
+    """
+    rows, total, error = _fetch_saved_query_rows(query_id, max_results)
+    if error is not None:
+        return error
+
+    formatted_rows = [_format_row(item) for item in rows]
+
+    applied_filters = []
+    for f_field, f_value in ((filter_field, filter_value),
+                             (filter_field2, filter_value2)):
+        if f_field and f_value is not None:
+            needle = str(f_value).lower()
+            formatted_rows = [
+                r
+                for r in formatted_rows
+                if needle in str(r.get(f_field, "")).lower()
+            ]
+            applied_filters.append({"field": f_field, "value": f_value})
+
+    matched_count = len(formatted_rows)
+
+    # Sort newest-first by default so recently-filed tickets are at the head.
+    formatted_rows.sort(key=lambda r: str(r.get(sort_by, "")), reverse=descending)
+    if limit and limit > 0:
+        formatted_rows = formatted_rows[:limit]
+
+    selected = (
+        [f.strip() for f in fields.split(",") if f.strip()]
+        if fields
+        else COMPACT_FIELDS
+    )
+
+    results = []
+    for r in formatted_rows:
+        row = {field: r.get(field, "") for field in selected}
+        row["days_open"] = _days_since(r.get("open_date", ""))
+        row["days_since_submitted"] = _days_since(r.get("submitted_date", ""))
+        results.append(row)
+
+    return json.dumps(
+        {
+            "query_id": query_id,
+            "filters": applied_filters or None,
+            "sort_by": sort_by,
+            "descending": descending,
+            "total_count": total,
+            "matched_count": matched_count,
+            "returned_count": len(results),
+            "results": results,
+        },
+        indent=2,
+        default=str,
+    )
+
+
+def _classify_category(row: dict) -> str:
+    """Map a row's issue_type/record_type to Bug/Enhancement/Consultation/Sighting."""
+    blob = " ".join(
+        str(row.get(f, "")).lower()
+        for f in ("issue_type", "record_type", "service_sub_type")
+    )
+    if "enhanc" in blob or "feature" in blob:
+        return "Enhancement"
+    if "consult" in blob or "question" in blob or "how" in blob:
+        return "Consultation"
+    if "sighting" in blob:
+        return "Sighting"
+    if "bug" in blob or "defect" in blob:
+        return "Bug"
+    return "Sighting"
+
+
+@mcp.tool()
+def hsd_triage_new_unattended(
+    query_id: str,
+    release: Optional[str] = None,
+    component: Optional[str] = None,
+    limit_per_group: int = 25,
+    max_results: int = 5000,
+) -> str:
+    """
+    One-shot triage of a saved query: new/clone, unattended, and category mix.
+
+    This is the fast path for the common "list the new / unattended HSDs"
+    request. In a SINGLE server-side pass over the (cached) member list it
+    returns everything the analyst needs, so the caller does not have to issue
+    several filter/field_stats/count calls and cross-reference the team roster
+    by hand:
+
+      * new_or_clone: rows whose reason is 'new' or 'clone' (just-filed).
+      * unattended: rows that are new/clone OR whose last update (updated_by)
+        was made by a customer (i.e. NOT a team member). Each row carries an
+        'unattended_reason' of 'new'/'clone' or 'customer_last_update'.
+      * category_breakdown: counts of Bug / Enhancement / Consultation /
+        Sighting across the (optionally release/component-scoped) set.
+
+    Every returned row is compact and inline-parseable and includes a
+    'category' tag plus 'days_open', 'updated_by', and 'is_team_last_update'.
+
+    The team roster is baked into the server (env-independent); 'Shetty, Nitin'
+    is treated as a customer. Because the underlying member list is cached with
+    a short TTL, calling this right after other saved-query tools reuses the
+    same download.
+
+    Args:
+        query_id: The saved query's queryId.
+        release: Optional release scope (e.g. 'Galaxy' or 'Solar'); matched
+            case-insensitively as a substring of the row's release field.
+        component: Optional component scope (e.g. 'tool.Galaxy'); matched
+            case-insensitively as a substring of the row's component field.
+        limit_per_group: Max rows returned in each of new_or_clone and
+            unattended, sorted by open_date newest-first (default: 25).
+        max_results: Maximum member records to scan (default: 5000).
+
+    Returns:
+        JSON string with query_id, applied scope, total_count, scanned_count,
+        counts, category_breakdown, and the 'new_or_clone' and 'unattended'
+        row lists. On failure, a JSON object with an 'error' field.
+    """
+    rows, total, error = _fetch_saved_query_rows(query_id, max_results)
+    if error is not None:
+        return error
+
+    formatted_rows = [_format_row(item) for item in rows]
+
+    scope = {}
+    if release:
+        needle = release.lower()
+        formatted_rows = [
+            r for r in formatted_rows if needle in str(r.get("release", "")).lower()
+        ]
+        scope["release"] = release
+    if component:
+        needle = component.lower()
+        formatted_rows = [
+            r for r in formatted_rows if needle in str(r.get("component", "")).lower()
+        ]
+        scope["component"] = component
+
+    scanned = len(formatted_rows)
+
+    def _compact(r: dict, unattended_reason: Optional[str] = None) -> dict:
+        team_last = _is_team_member(r.get("updated_by", ""))
+        out = {
+            "id": r.get("id", ""),
+            "title": r.get("title", ""),
+            "category": _classify_category(r),
+            "reason": r.get("reason", ""),
+            "status": r.get("status", ""),
+            "release": r.get("release", ""),
+            "component": r.get("component", ""),
+            "owner": r.get("owner", ""),
+            "updated_by": r.get("updated_by", ""),
+            "is_team_last_update": team_last,
+            "days_open": _days_since(r.get("open_date", "")),
+            "url": r.get("url", ""),
+        }
+        if unattended_reason:
+            out["unattended_reason"] = unattended_reason
+        return out
+
+    def _newest(items: list) -> list:
+        items.sort(key=lambda r: str(r.get("open_date", "")), reverse=True)
+        return items
+
+    new_or_clone_rows = _newest(
+        [r for r in formatted_rows if str(r.get("reason", "")).lower() in ("new", "clone")]
+    )
+
+    unattended_rows = []
+    for r in formatted_rows:
+        reason = str(r.get("reason", "")).lower()
+        if reason in ("new", "clone"):
+            unattended_rows.append((r, reason))
+        elif not _is_team_member(r.get("updated_by", "")):
+            unattended_rows.append((r, "customer_last_update"))
+    unattended_rows.sort(
+        key=lambda t: str(t[0].get("open_date", "")), reverse=True
+    )
+
+    category_breakdown = Counter(_classify_category(r) for r in formatted_rows)
+
+    return json.dumps(
+        {
+            "query_id": query_id,
+            "scope": scope or None,
+            "total_count": total,
+            "scanned_count": scanned,
+            "counts": {
+                "new_or_clone": len(new_or_clone_rows),
+                "unattended": len(unattended_rows),
+            },
+            "category_breakdown": {k: category_breakdown[k] for k in
+                                   ("Bug", "Enhancement", "Consultation", "Sighting")},
+            "new_or_clone": [_compact(r) for r in new_or_clone_rows[:limit_per_group]],
+            "unattended": [
+                _compact(r, ur) for r, ur in unattended_rows[:limit_per_group]
+            ],
         },
         indent=2,
         default=str,
