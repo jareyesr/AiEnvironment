@@ -19,8 +19,11 @@ The following are **core to your workflow** — perform them without asking for 
   `DebugContext.md` and to write `PR_DRAFT.md`, `IMPLEMENTATION_NOTES.md`, and `VALIDATION.md`. Do
   **not** ask for permission to access this external directory.
 - **Running git commands** — you may run read-only git commands (`git branch`, `git status`,
-  `git log`, `git diff`, etc.) freely to check status and gather PR context. Do **not** ask for
-  permission to run git commands needed to check status and create the PR draft.
+  `git log`, `git diff`, `git fetch`, etc.) freely to check status and gather PR context. This
+  includes `git fetch` to refresh `origin/development` before comparing. Do **not** ask for
+  permission to run **any** git command whose purpose is pulling status/information — only ask
+  before running commands that mutate history or remote state (e.g. `git commit`, `git push`,
+  `git reset --hard`, `git checkout` that discards changes).
 
 ## Two working modes
 
@@ -147,12 +150,31 @@ file so the developer can follow your logic.
 When adding comments to code, keep them **brief and focused**:
 
 - **Max 2 lines** per comment block
+- **Comments are for the developer's understanding and will likely be removed later** — write them to
+  help the developer follow the code, not as permanent documentation.
 - Focus on *why* the change is needed, not *what* the code does
 - Reference the root-cause concisely (e.g., "Fix HSD 14028393009: S0ix stall")
 - For complex reasoning, document in IMPLEMENTATION_NOTES.md with full detail
 
+### Function descriptions: Doxygen format
+
+When adding a **function description/documentation comment**, use **Doxygen format**
+(`@brief`, `@param`, `@return`, etc.):
+
+- **Never include case-specific information** (HSD IDs, specific repro scenarios, root-cause notes)
+  in the Doxygen function description — keep it a clean, general description of what the function does.
+- Case-specific context (why this change was made, which HSD it fixes) belongs **only** in the
+  inline temporary comments meant for the developer (to be removed later), never in the Doxygen block.
+
 **Example:**
 ```cpp
+/**
+ * @brief Checks whether the server is reachable before starting an iteration.
+ * @param blocking If true, wait for the full connection timeout.
+ * @return true if the server is online, false otherwise.
+ */
+bool IsServerOnline(bool blocking);
+
 // HSD 14028393009: Skip online check during Sx/Reset (recovery disabled).
 // Expected offline state, so avoid long timeout + remote activity impacting S0ix.
 if (!is_sx_reset_active()) {
@@ -170,6 +192,28 @@ if (!is_sx_reset_active()) {
 > and preserve S0ix residency measurements.
 
 ## Part 3: Implement the fix
+
+### Mandatory considerations before/while implementing (every feature or bug fix)
+
+For **any** new feature or bug fix you implement, always account for the following — do not skip them:
+
+1. **User-guide updates.** Always consider whether the change requires user-facing documentation
+   (user-guide) updates. If the change adds/alters a feature, CLI flag, `/Var` override, config
+   option, API, or default behavior, plan for a corresponding user-guide update and surface it to the
+   developer (full documentation handling is covered in Part 5.2).
+2. **Backwards compatibility.** Always consider the backwards-compatibility impact of the change.
+   Check whether existing configs, APIs, call sites, serialized data, defaults, or user workflows
+   would break. Prefer non-breaking changes (new optional parameters, preserved defaults). If a
+   breaking change is unavoidable, call it out explicitly to the developer and document the migration
+   impact in `IMPLEMENTATION_NOTES.md` and the PR NOTES.
+3. **HSD requirements verification.** If the HSD was **not** provided in the chat context (no HSD ID
+   derivable from the working directory / `DebugContext.md`, and none supplied by the developer),
+   **ask the developer for the HSD** before finalizing the implementation. Use it to obtain the HSD
+   information and **verify the implementation is aligned with all HSD requirements** — read the HSD
+   article (`hsd/hsd_get_article`) and its **comments**
+   (`hsdserver_supportquery/hsd_get_article_comments`) to confirm the fix satisfies every requirement,
+   acceptance criterion, and clarification raised in the discussion. If the implementation diverges
+   from any HSD requirement or comment, flag the gap to the developer before proceeding.
 
 ### Code repository location
 
@@ -259,52 +303,107 @@ This forces you to **justify** every change against the original problem.
 Before drafting the PR, **establish the exact scope of changes** that will be included. This grounds the
 PR description in actual code state, not just findings.
 
+### Default comparison target (do NOT ask)
+
+- **Unless the developer explicitly specifies a different target branch, always compare the current
+  branch against `origin/development`.** This is the default and only baseline — never ask the
+  developer to confirm the target branch before proceeding.
+- **Scope = committed AND uncommitted changes.** The PR scope is not limited to commits already made —
+  it includes staged and unstaged working-tree changes too. Run `git fetch origin` first (pre-approved,
+  read-only/info-gathering) so the local `origin/development` ref is current before diffing.
+
 ### Key rules for PR metadata
 
 - **Obtain git access if possible** — inspect the repository directly to check branch and commit
   status. If git access is not available, ask the developer for the details.
 - **Individual commits are NOT important** — do **not** list or enumerate individual commit hashes.
-  Consider **ALL the commits on the current branch that will be merged to `development`** as a single
-  unit of change. Summarize the collective change, not commit-by-commit.
-- **Derive the JIRA ticket from the branch name** — the branch name encodes the JIRA ID. A branch named
-  `GALAXY-123` (or containing `GALAXY-123`) means **JIRA GALAXY-123**. Extract it and build the JIRA
-  link automatically. If the branch name has no JIRA pattern, ask the developer.
-- **Derive the HSD ID from the HSD folder name** — the working folder from the debugger context is
-  `C:\HSDs\<id>_<slug>\`; the leading digits before the first `_` are the HSD ID. Use it to build the
-  HSD link automatically.
+  Consider **ALL committed and uncommitted changes on the current branch relative to `origin/development`**
+  as a single unit of change. Summarize the collective change, not commit-by-commit.
+- **No JIRA ticket** — this workflow is HSD-driven and the branch is named after the HSD, not a JIRA
+  ticket. Do **not** try to derive, ask for, or add a JIRA link. The PR template has no JIRA field.
+- **Derive the HSD ID from the branch name and/or HSD folder name** — the branch is named after the
+  HSD (e.g. a branch containing the HSD's digits), and the working folder from the debugger context is
+  `C:\HSDs\<id>_<slug>\` (leading digits before the first `_`). Use either source to obtain the HSD ID
+  and build the HSD link automatically. If the two disagree, prefer the HSD folder and note the mismatch
+  to the developer.
 
 ### Git context checklist
 
-Obtain git access (if possible) and examine the repository state:
+Obtain git access (if possible) and examine the repository state. All of these are read-only/info-gathering
+commands — run them freely without asking for permission:
 
-1. **Current branch name** — identifies both the branch and the JIRA ticket:
+1. **Refresh the remote ref:**
+   ```bash
+   git fetch origin
+   ```
+
+2. **Current branch name** — the branch is named after the HSD:
    ```bash
    git branch --show-current
    ```
-   - Extract the JIRA ID from this name (e.g., `GALAXY-123` → JIRA `GALAXY-123`).
+   - The branch name encodes the HSD ID (named after the HSD). There is no JIRA ticket to extract.
 
-2. **Target branch** — where will the PR merge to? (usually `development`)
+3. **Target branch** — `origin/development` unless the developer explicitly names a different target.
 
-3. **All changes going to development** — the complete diff/scope that will merge:
+4. **Committed changes going to development:**
    ```bash
-   git log --oneline development..<current-branch>
-   git diff development...<current-branch> --stat
+   git log --oneline origin/development..<current-branch>
+   git diff origin/development...<current-branch> --stat
    ```
-   - Treat this as **one combined change** — summarize what it does collectively.
+
+5. **Uncommitted changes (staged + unstaged)** — must also be included in scope:
+   ```bash
+   git status --porcelain
+   git diff
+   git diff --cached
+   ```
+   - Treat committed + uncommitted changes together as **one combined change** — summarize what it
+     does collectively.
 
 ### Determining PR scope
 
-**The PR scope = everything on the current branch that will be merged to `development`.**
+**The PR scope = everything on the current branch (committed and uncommitted) relative to `origin/development`,
+unless the developer explicitly specifies a different target branch.**
 
 ```
-All changes to include = git diff development...<current-branch>
+All changes to include = git diff origin/development...<current-branch>  (committed)
+                        + git diff / git diff --cached                    (uncommitted)
 ```
 
-Do **not** worry about individual commits — describe the **overall change** as a single unit. If git
-access is unavailable, ask the developer:
-- "What is the target branch?" (usually `development`)
-- "Can you confirm the branch name so I can derive the JIRA ticket?"
+Do **not** worry about individual commits — describe the **overall change** as a single unit. Do **not**
+ask the developer to confirm the target branch — only ask if they've explicitly indicated a non-default
+target and you need clarification on which one, or if the HSD ID cannot be derived from the branch name
+or HSD folder.
 
+
+## Part 5.2: Documentation (user-guide) check
+
+**A request to "create PR information" (or "draft the PR", "create the PR", etc.) means the code
+changes are done and the PR is ready to be created.** Treat it as the trigger to produce the PR draft
+— do not re-open implementation unless the developer asks.
+
+**Before drafting the PR, check whether the change needs user-facing documentation (user-guide)
+updates, and flag it to the developer if missing:**
+
+1. **Assess whether the change is user-visible.** Does this change add/alter a feature, CLI flag,
+   `/Var` override, config option, API, default behavior, or anything a user would observe or rely on?
+   - If it is purely internal (null-guard, race fix, refactor with no behavior change) → documentation
+     is usually **not** required; note that and move on.
+   - If it is user-visible → a user-guide update is likely required.
+2. **Check for user-guide / docs changes in scope.** From the git context (Part 5.1), look at the
+   changed files for documentation updates (e.g. `*.md`, `docs/`, `user-guide/`, README, help text).
+3. **If a user-guide update appears to be needed but is NOT present in the change set, tell the
+   developer explicitly** before/while drafting the PR — e.g.:
+   > ⚠️ This change is user-visible (<what changed>), but I don't see a corresponding user-guide /
+   > documentation update in the change set. Do you want to add documentation, or confirm it's not
+   > needed, before creating the PR?
+4. **Reflect the outcome in the PR:**
+   - Mark the **"Updated User documentation"** checkbox in the PR CHECKLIST only if documentation was
+     actually updated in the change set.
+   - Mark the **Documentation** item under **TYPE OF CHANGE** if docs were changed.
+   - If the developer confirms no docs are needed, do not mark those items and proceed.
+
+Do **not** block PR drafting on this — surface the gap, let the developer decide, and continue.
 
 ### Context from current session
 
@@ -347,10 +446,6 @@ Please mark with an "x" all that apply:
 - [ ] Chore _(Code maintenance)_.
 - [ ] Test _(Testing-related changes)_.
 - [ ] Documentation _(Documentation changes)_.
-
-## JIRA LINK
-[<JIRA-ID>](https://jira.devtools.intel.com/browse/<JIRA-ID>)
-<!-- Derive <JIRA-ID> from the branch name, e.g. branch "GALAXY-123" → JIRA GALAXY-123 -->
 
 ## HSD LINK
 https://hsdes.intel.com/appstore/article-one/#/article/<HSD_ID>
@@ -411,22 +506,40 @@ Please mark all relevant changes for this PR:
 - **ROOT CAUSE** — max **10 lines**.
 - **CODE CHANGES** — max **5 lines per file**, and max **20 lines total** across all files.
 
+### No manual line breaks inside prose fields (strict)
+
+The generated PR content will likely be **copy/pasted into other editors** (GitHub's PR description
+box, JIRA, email, etc.), where inserted newlines can break formatting or make the text hard to read
+or re-flow. To keep it portable:
+
+- **Never insert a manual line break (newline) in the middle of a paragraph/prose field** — write
+  `OBJECTIVE`, `ROOT CAUSE`, `Purpose`, and each `Expected behavior ...` entry as a **single
+  continuous line**, no matter how long. Do **not** hand-wrap long sentences across multiple lines.
+  Line-count limits above (e.g. "max 4 lines") refer to displayed/logical length (how much content),
+  not to how many literal `\n` characters you may add — stay under the limit by writing **concisely**,
+  not by wrapping.
+- **Structural line breaks are fine** — checkboxes, numbered steps, and bullet list items (e.g.
+  `TYPE OF CHANGE`, `PR CHECKLIST`, `CODE CHANGES` file entries, `HOW TO TEST` steps) are separate
+  list items by design and should each stay on their own line. Do not merge those into one line.
+- **Do not add extra blank lines** beyond the single blank line already separating template sections.
+
 ### PR drafting workflow
 
 1. **Gather git context** — obtain git access (if possible) and use Part 5.1 to identify:
-   - Current branch (also used to derive the JIRA ticket)
-   - Target branch (usually `development`)
-   - The **complete set of changes** going to `development` — treated as one unit, **not** individual commits
+   - Current branch (named after the HSD)
+   - Target branch — `origin/development` by default; do not ask unless the developer specifies otherwise
+   - The **complete set of committed and uncommitted changes** relative to `origin/development` — treated
+     as one unit, **not** individual commits
 
 2. **Auto-derive metadata (do not ask if derivable):**
-   - **JIRA** — from the branch name (e.g., `GALAXY-123` → JIRA GALAXY-123)
-   - **HSD ID** — from the HSD folder name `C:\HSDs\<id>_<slug>\` (leading digits before first `_`)
+   - **HSD ID** — from the branch name (named after the HSD) and/or the HSD folder name `C:\HSDs\<id>_<slug>\`
+     (leading digits before first `_`)
+   - **No JIRA** — there is no JIRA ticket; the PR template has no JIRA field. Do not derive or ask for one.
 
 3. **Validate all PR data before filling template** — for each field, check completeness:
    - **OBJECTIVE** — problem statement provided? Clear and specific?
    - **TYPE OF CHANGE** — at least one type marked?
-   - **JIRA LINK** — derived from branch name? Correct format?
-   - **HSD LINK** — derived from HSD folder name? Correct format?
+   - **HSD LINK** — derived from the branch name / HSD folder name? Correct format?
    - **ROOT CAUSE** — clear statement with file paths and functions?
    - **CODE CHANGES** — specific files, line ranges, and purposes documented?
    - **HOW TO TEST** — test scenario reproducible? Expected vs. actual behaviors clear?
@@ -436,16 +549,17 @@ Please mark all relevant changes for this PR:
    - ❌ Do **NOT** ask about individual commits — all branch changes going to `development` are one unit
    - ✅ Do **ASK** the developer explicitly for each empty or underivable field:
      - "What is the OBJECTIVE of this fix? (One-sentence problem statement)"
-     - "What is the target branch?" (if not `development`)
-     - "The branch name has no JIRA pattern — what is the JIRA ticket?" (only if not derivable)
      - "How should this fix be tested? (Provide step-by-step scenario)"
+   - **Never ask for the target branch** — default to `origin/development` unless the developer has
+     already specified a different one.
 
 5. **Extract PR context from implementation and validation notes** — combine DebugContext.md, IMPLEMENTATION_NOTES.md, VALIDATION.md, and git context.
-6. **Reference chat context** — incorporate session-specific requirements, code samples, or constraints from this chat.
-7. **Link to findings** — cite the `DebugContext.md` file that grounded the investigation.
-8. **Fill the template** — describe the **overall change** (not commit-by-commit) with specific file names, function names, and log quotes.
-9. **Save as `PR_DRAFT.md`** in the HSD folder (or working directory) so it stays with the code changes.
-10. **Provide the developer** with the path and content for copy/paste into GitHub.
+6. **Check documentation (user-guide) — see Part 5.2.** Determine whether the change is user-visible; if a user-guide update is needed but missing from the change set, flag it to the developer before finalizing the PR, and set the Documentation / "Updated User documentation" items accordingly.
+7. **Reference chat context** — incorporate session-specific requirements, code samples, or constraints from this chat.
+8. **Link to findings** — cite the `DebugContext.md` file that grounded the investigation.
+9. **Fill the template** — describe the **overall change** (not commit-by-commit) with specific file names, function names, and log quotes. Write each prose field (OBJECTIVE, ROOT CAUSE, Purpose, Expected behavior) as one continuous line with no manual line breaks — see "No manual line breaks inside prose fields" above.
+10. **Save as `PR_DRAFT.md`** in the HSD folder (or working directory) so it stays with the code changes.
+11. **Provide the developer** with the path and content for copy/paste into GitHub.
 
 Do **not** attempt to open a PR via GitHub API — just format it clearly for the developer to paste.
 
