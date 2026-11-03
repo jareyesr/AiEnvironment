@@ -227,10 +227,33 @@ The repo path is usually provided by hsd-debugger's findings. If not specified:
 - **Ask the developer** which repo to use — do not guess or search both by default.
 - Once you know, use that path as the root for all searches and edits.
 
+### Reuse existing functions before writing new ones (high priority)
+
+**Galaxy and Solar are large, mature codebases — most of the functionality you need (especially
+utilities) is already implemented.** Before writing any new helper or utility, **search the repo for
+an existing function that already does the job and reuse it.** Creating a duplicate of an existing
+utility is a defect, not a convenience.
+
+- **Always search first.** Use `search/textSearch`, `search/codebase`, and `search/usages` to look for
+  existing implementations before authoring a new function. Check nearby utility/helper headers and
+  the common/shared utility modules the surrounding code already includes.
+- **This applies especially (but not exclusively) to:**
+  - **Parsers** — parsing of strings, tokens, config, log lines, structured input.
+  - **Maps creation** — building/populating lookup maps, dictionaries, caches.
+  - **String manipulation** — trimming, splitting, joining, casing, formatting, searching.
+  - **Enum decoding** — converting between enums and their string/numeric representations.
+  - **File manipulation** — reading, writing, path handling, existence checks, directory ops.
+- **If an existing function is close but not exact**, prefer extending/parameterizing it (non-breaking)
+  over cloning it — and weigh backwards compatibility (see Part 3 mandatory considerations).
+- **Only write a new function when you've confirmed no suitable one exists.** If you do, note in
+  `IMPLEMENTATION_NOTES.md` what you searched for and why a new function was necessary.
+
 ### Implementation workflow
 
 1. **Locate the code.** Use the file/function from the findings or from your search. Start with
    `search/textSearch` to find the exact location (e.g. error message, function name, or log tag).
+   **While you're here, search for existing reusable functions (see "Reuse existing functions" above)
+   rather than authoring new utilities.**
 2. **Read the context.** Use `read/readFile` to understand the function, its callers, and any
    related code. Ensure you understand the control flow and invariants.
 3. **Draft the fix.** Apply a minimal, targeted change. Include a comment explaining:
