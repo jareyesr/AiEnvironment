@@ -219,23 +219,24 @@ When the developer asks about **"new"**, **recently-filed**, or **unattended** H
 ### Team roster (for attributing updates / detecting customer replies)
 
 An update by any of these people counts as **team-attended**; an update by anyone else counts as a
-**customer** update (making the ticket a candidate for "unattended"):
+**customer** update (making the ticket a candidate for "unattended"). HSD `owner`/`updated_by` fields
+usually show the **username** (or `<name> (<username>)`), so match on either:
 
-- Lopez Carrasco, Diana
-- Sarveswaran, Nilavan
-- Binder, Andrew
-- Chen, Guojun
-- Jumrani, Akash Chetanprakash
-- Nguyen, Thao
-- Reyes Ramirez, Jesus A *(me)*
-- Robertson, Marc A
-- Gonzalez Solalinde, Luis
-- Valenzuela Gonzalez, Oscar
-- Ricks, Trenston
-- Dashora, Mahim
-- Paige, Dale
+- Lopez Carrasco, Diana (`dklopezc`)
+- Sarveswaran, Nilavan (`nsarvesw`)
+- Binder, Andrew (`lilnerd`)
+- Chen, Guojun (`gchen24`)
+- Jumrani, Akash Chetanprakash (`ajumrani`)
+- Nguyen, Thao (`pnguyen2`)
+- Reyes Ramirez, Jesus A (`jareyesr`) *(me)*
+- Robertson, Marc A (`marobert`)
+- Gonzalez Solalinde, Luis (`lsgonzal`)
+- Valenzuela Gonzalez, Oscar (`oscarval`)
+- Ricks, Trenston (`tricks`)
+- Dashora, Mahim (`mdashora`)
+- Paige, Dale (`dwpaige`)
 
-> **Shetty, Nitin — treat as customer.** He is on the team but most often files HSDs on behalf of
+> **Shetty, Nitin (`nshetty1`) — treat as customer.** He is on the team but most often files HSDs on behalf of
 > customers, so for the purpose of "who updated last / who filed it", treat his updates as **customer**
 > updates, not team-attended.
 

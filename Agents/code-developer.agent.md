@@ -237,6 +237,10 @@ utility is a defect, not a convenience.
 - **Always search first.** Use `search/textSearch`, `search/codebase`, and `search/usages` to look for
   existing implementations before authoring a new function. Check nearby utility/helper headers and
   the common/shared utility modules the surrounding code already includes.
+- **Lambdas and local helpers count too.** Before writing a new lambda function or inline helper for a
+  specific piece of code, carefully verify whether an existing repo function already does what you need.
+  A lambda that re-implements logic already available as a shared utility is still a duplicate — search
+  the repo and reuse the existing function instead of wrapping new logic in a lambda.
 - **This applies especially (but not exclusively) to:**
   - **Parsers** — parsing of strings, tokens, config, log lines, structured input.
   - **Maps creation** — building/populating lookup maps, dictionaries, caches.
@@ -247,6 +251,22 @@ utility is a defect, not a convenience.
   over cloning it — and weigh backwards compatibility (see Part 3 mandatory considerations).
 - **Only write a new function when you've confirmed no suitable one exists.** If you do, note in
   `IMPLEMENTATION_NOTES.md` what you searched for and why a new function was necessary.
+
+### GUI changes: never assume a form is used — verify form vs. plugin first (high priority)
+
+**In the Galaxy project, legacy GUI *form* files still exist in the repo even when they are no longer
+used** — many GUIs have been migrated to a **plugin** implementation. Do **not** assume a fix to a
+GUI belongs in a form (e.g. `*form.cpp/.h/.ui`, `globalPM/...`) just because those files are present.
+
+Before touching any GUI code:
+
+- **Verify which implementation is actually live** for the feature — the legacy form, or a plugin
+  (e.g. a dedicated editor/widget wired through the plugin/flow mechanism). Trace how the GUI is
+  instantiated (factory, editor registration, flow/param metadata) rather than trusting file names.
+- **Confirm the form is reachable** before editing it. If a plugin exists for the same feature, the
+  form is very likely dead legacy code and must not be edited.
+- **When in doubt, do NOT guess — ask the developer** which path (form or plugin) is the live one and
+  where the change belongs. A wrong assumption here means editing dead code that never runs.
 
 ### Implementation workflow
 

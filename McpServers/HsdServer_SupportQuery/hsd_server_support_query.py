@@ -304,33 +304,39 @@ _SAVED_QUERY_CACHE_TTL = float(os.getenv("SAVED_QUERY_CACHE_TTL", "120"))
 # a customer update (a signal the ticket is "unattended"). NOTE: "Shetty,
 # Nitin" is intentionally excluded — he is on the team but files/updates on
 # behalf of customers, so his updates are treated as customer updates.
-TEAM_MEMBERS = [
-    "Lopez Carrasco, Diana",
-    "Sarveswaran, Nilavan",
-    "Binder, Andrew",
-    "Chen, Guojun",
-    "Jumrani, Akash Chetanprakash",
-    "Nguyen, Thao",
-    "Reyes Ramirez, Jesus",
-    "Robertson, Marc",
-    "Gonzalez Solalinde, Luis",
-    "Valenzuela Gonzalez, Oscar",
-    "Ricks, Trenston",
-    "Dashora, Mahim",
-    "Paige, Dale",
-]
+# Maps display name -> HSD username (owner/updated_by fields usually carry the
+# username, sometimes as "<name> (<username>)").
+TEAM_MEMBERS = {
+    "Lopez Carrasco, Diana": "dklopezc",
+    "Sarveswaran, Nilavan": "nsarvesw",
+    "Binder, Andrew": "lilnerd",
+    "Chen, Guojun": "gchen24",
+    "Jumrani, Akash Chetanprakash": "ajumrani",
+    "Nguyen, Thao": "pnguyen2",
+    "Reyes Ramirez, Jesus": "jareyesr",
+    "Robertson, Marc": "marobert",
+    "Gonzalez Solalinde, Luis": "lsgonzal",
+    "Valenzuela Gonzalez, Oscar": "oscarval",
+    "Ricks, Trenston": "tricks",
+    "Dashora, Mahim": "mdashora",
+    "Paige, Dale": "dwpaige",
+}
+_TEAM_USERNAMES = {u.lower() for u in TEAM_MEMBERS.values()}
 
 
 def _is_team_member(name: str) -> bool:
-    """True when the given updated_by/owner name matches a team member.
+    """True when the given updated_by/owner value matches a team member.
 
-    Matching compares the first two tokens (surname + first name) of each
-    roster entry against the name, case-insensitively, so a middle initial or
-    suffix in either string does not break the match.
+    Matches either an HSD username (exact token, e.g. 'nsarvesw' or
+    'Sarveswaran, Nilavan (nsarvesw)') or a display name, comparing the first
+    two tokens (surname + first name) of each roster entry case-insensitively,
+    so a middle initial or suffix in either string does not break the match.
     """
     if not name:
         return False
     haystack = str(name).lower()
+    if _TEAM_USERNAMES.intersection(re.findall(r"[a-z0-9_.]+", haystack)):
+        return True
     for member in TEAM_MEMBERS:
         tokens = [t for t in re.split(r"[,\s]+", member.lower()) if t][:2]
         if tokens and all(tok in haystack for tok in tokens):

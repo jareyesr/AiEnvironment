@@ -27,23 +27,24 @@ HSD tickets and GitHub activity often reference other people by name, and it's n
 the data alone whether someone is a **team member** (internal collaborator) or a **real customer**
 (external, validating/using Solar/Galaxy tools). Use this reference list to disambiguate:
 
-**Team members** (internal — treat any of these names as a colleague/collaborator, not a customer):
-- Lopez Carrasco, Diana
-- Sarveswaran, Nilavan
-- Binder, Andrew
-- Chen, Guojun
-- Jumrani, Akash Chetanprakash
-- Nguyen, Thao
-- Reyes Ramirez, Jesus A *(me — see Identity above)*
-- Robertson, Marc A
-- Gonzalez Solalinde, Luis
-- Valenzuela Gonzalez, Oscar
-- Ricks, Trenston
-- Dashora, Mahim
-- Paige, Dale
+**Team members** (internal — treat any of these names *or usernames* as a colleague/collaborator, not
+a customer). HSD fields like `owner`/`updated_by` often show only the username, or `<name> (<username>)`:
+- Lopez Carrasco, Diana (`dklopezc`)
+- Sarveswaran, Nilavan (`nsarvesw`)
+- Binder, Andrew (`lilnerd`)
+- Chen, Guojun (`gchen24`)
+- Jumrani, Akash Chetanprakash (`ajumrani`)
+- Nguyen, Thao (`pnguyen2`)
+- Reyes Ramirez, Jesus A (`jareyesr`) *(me — see Identity above)*
+- Robertson, Marc A (`marobert`)
+- Gonzalez Solalinde, Luis (`lsgonzal`)
+- Valenzuela Gonzalez, Oscar (`oscarval`)
+- Ricks, Trenston (`tricks`)
+- Dashora, Mahim (`mdashora`)
+- Paige, Dale (`dwpaige`)
 
 **Explicit customer override:**
-- `Shetty, Nitin` — always treat as a **customer**, even though the name might otherwise look like an
+- `Shetty, Nitin` (`nshetty1`) — always treat as a **customer**, even though the name might otherwise look like an
   internal collaborator.
 
 Anyone appearing in HSD/GitHub/email/Teams data who is **not** on the team-members list above (and is
@@ -66,6 +67,12 @@ they involve external credentials or a directory outside the workspace:
 - **Never ask for permission to access `C:\Reports\Weekly\`.** This is an **external directory**
   (outside the workspace) that you are always allowed to read from and write to — check prior weekly
   reports and save new ones there freely, with no confirmation prompt.
+- **Writing weekly report files** — you may create and write `C:\Reports\Weekly\WW<NUMBER>.md`
+  (for example, `C:\Reports\Weekly\WW47.md`) freely. If the target file already exists, you may update
+  or overwrite it with the current report. You do not need confirmation, because saving the weekly
+  report is a required workflow action. Keep the operation scoped to `C:\Reports\Weekly\` and use
+  the `WW<NUMBER>.md` filename convention. This permission includes creating the `Weekly` folder if
+  it does not already exist.
 
 Do **not** ask for permission for any of the above — they are required every time you generate a report.
 
