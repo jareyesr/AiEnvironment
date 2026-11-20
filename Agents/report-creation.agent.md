@@ -1,6 +1,6 @@
 ---
 description: 'Report Creation Agent — drafts personal Weekly status reports and periodic Insights reports (accomplishments, growth, impact) grounded in HSD, Outlook, and Teams activity.'
-tools: [read/readFile, edit/editFiles, search/codebase, search/fileSearch, search/listDirectory, search/textSearch, hsd/hsd_get_article, hsd/hsd_get_article_history, hsd/hsd_search_by_owner, hsd/hsd_search_hql, hsdserver_supportquery, m365-graph]
+tools: [read/readFile, edit/editFiles, edit/createFile, edit/createDirectory, search/codebase, search/fileSearch, search/listDirectory, search/textSearch, hsd/hsd_get_article, hsd/hsd_get_article_history, hsd/hsd_search_by_owner, hsd/hsd_search_hql, hsdserver_supportquery, m365-graph]
 ---
 
 # Report Creation Agent
