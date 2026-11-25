@@ -18,6 +18,12 @@ The following are **core to your workflow** — perform them without asking for 
   `C:\HSDs\<id>_<slug>\` (and any external HSD context folder) freely. This is required to read
   `DebugContext.md` and to write `PR_DRAFT.md`, `IMPLEMENTATION_NOTES.md`, and `VALIDATION.md`. Do
   **not** ask for permission to access this external directory.
+- **Writing `IMPLEMENTATION_NOTES.md`** — always create/update it without asking, in the HSD folder
+  (if any) or otherwise the local repository root. This includes shared notes used across multiple
+  chats (see "Splitting large work across multiple chats").
+- **Writing `PR_DRAFT.md`** — when asked to create PR information / a PR draft, always write it
+  without asking: to the HSD debug folder `C:\HSDs\<id>_<slug>\` if one exists, otherwise to the local
+  repository root. Never stage or commit these notes/draft files.
 - **Running git commands** — you may run read-only git commands (`git branch`, `git status`,
   `git log`, `git diff`, `git fetch`, etc.) freely to check status and gather PR context. This
   includes `git fetch` to refresh `origin/development` before comparing. Do **not** ask for
@@ -601,7 +607,7 @@ or re-flow. To keep it portable:
 7. **Reference chat context** — incorporate session-specific requirements, code samples, or constraints from this chat.
 8. **Link to findings** — cite the `DebugContext.md` file that grounded the investigation.
 9. **Fill the template** — describe the **overall change** (not commit-by-commit) with specific file names, function names, and log quotes. Write each prose field (OBJECTIVE, ROOT CAUSE, Purpose, Expected behavior) as one continuous line with no manual line breaks — see "No manual line breaks inside prose fields" above.
-10. **Save as `PR_DRAFT.md`** in the HSD folder (or working directory) so it stays with the code changes.
+10. **Save as `PR_DRAFT.md`** without asking — in the HSD debug folder `C:\HSDs\<id>_<slug>\` if one exists, otherwise in the local repository root.
 11. **Provide the developer** with the path and content for copy/paste into GitHub.
 
 Do **not** attempt to open a PR via GitHub API — just format it clearly for the developer to paste.
@@ -662,6 +668,53 @@ C:\HSDs\<id>_<slug>\
   it's minimal.
 - **Respect the development workflow.** You implement; the developer reviews, builds, tests, and
   opens the PR.
+- **Descriptive item names — no short codes.** When listing concepts, hypotheses, approaches,
+  scenarios, fixes, work items, pending tasks, etc. (in chat, `IMPLEMENTATION_NOTES.md`,
+  `VALIDATION.md`, or `PR_DRAFT.md`), never use labels like "A1", "R3c", "H2". Name each by its
+  category and number: "Hypothesis 2", "Approach 1", "Scenario 3", "Fix 1", "Work item 2",
+  "Pending task 1". When the item only makes sense relative to another, include that context:
+  "Fix 1 for Scenario 2", "Pending task 2 for Work item 1". Keep the same names consistently across
+  responses, files, and chats.
+
+## Splitting large work across multiple chats
+
+For **large features/fixes** (many files/modules, several independent sub-parts, or long-running
+work that would overflow a single chat's context), **recommend splitting the work across multiple
+chats** to the developer. All chats share the same `IMPLEMENTATION_NOTES.md` (HSD folder or local
+repository root) as the coordination point to understand and interact with each other.
+
+**Shared `IMPLEMENTATION_NOTES.md` structure:**
+
+```markdown
+## Overall plan
+<goal, root-cause/requirement, overall approach>
+
+## Work split
+| Work item | Scope (files/modules) | Chat | Status | Depends on |
+|---|---|---|---|---|
+| Work item 1 — <name> | ... | Chat 1 | not-started / in-progress / done / blocked | — |
+
+## Shared contracts
+<interfaces, signatures, data formats, naming agreed between work items>
+
+## Work item 1 — <name>
+<reasoning, decisions, changes made, open questions, handoff notes>
+
+## Cross-chat messages
+- [Chat 2 → Chat 1] <question/request> — <answer when resolved>
+```
+
+**Rules for each chat:**
+
+1. **On start, read `IMPLEMENTATION_NOTES.md`** and report which work item this chat owns, its
+   dependencies, and any pending cross-chat messages addressed to it.
+2. **Re-read the file immediately before every write** — other chats may have changed it. Never
+   overwrite or rewrite another chat's section; only update your own work item section, your row in
+   the Work split table, and append to Cross-chat messages.
+3. **Changing a Shared contract** requires adding a Cross-chat message to affected work items and
+   flagging it to the developer.
+4. **Before finishing**, update your work item's status and handoff notes so the next chat can
+   continue without this chat's history.
 
 ## Next steps and handoff
 
